@@ -27,7 +27,7 @@ import argparse
 import logging
 import os
 import wandb
-from models import DiT_models
+from deq_models import DiT_DEQ_models
 from diffusion import create_diffusion
 from diffusers.models import AutoencoderKL
 
@@ -141,9 +141,8 @@ def current_time():
     return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 def main(args):
-    
     """
-    Trains a new DiT model.
+    Trains a new DiT-DEQ model.
     """
     assert torch.cuda.is_available(), "Training currently requires at least one GPU."
 
@@ -176,14 +175,18 @@ def main(args):
     # Create model:
     assert args.image_size % 8 == 0, "Image size must be divisible by 8 (for the VAE encoder)."
     latent_size = args.image_size // 8
-    model = DiT_models[args.model](
+    # model = DiT_models[args.model](
+    #     input_size=latent_size,
+    #     num_classes=args.num_classes
+    # )
+    model = DiT_DEQ_models[args.model](
         input_size=latent_size,
         num_classes=args.num_classes
     )
     # Note that parameter initialization is done within the DiT constructor
     ema = deepcopy(model).to(device)  # Create an EMA of the model for use after training
     requires_grad(ema, False)
-    model = DDP(model.to(device), device_ids=[rank])
+    model = DDP(model.to(device), device_ids=[rank], find_unused_parameters=True)
     diffusion = create_diffusion(timestep_respacing="")  # default: 1000 steps, linear noise schedule
     vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
     logger.info(f"DiT Parameters: {sum(p.numel() for p in model.parameters()):,}")
@@ -243,7 +246,7 @@ def main(args):
     logger.info(f"Training for {args.epochs} epochs...")
     for epoch in range(args.epochs):
         if rank == 0:
-            print(f"entered epoch {epoch}, current time is {current_time()}")
+            print(f"entered epoch {epoch}, current time {current_time()}")
         
         # if epoch % 10 == 0 and rank == 0:
 
@@ -251,16 +254,17 @@ def main(args):
         sampler.set_epoch(epoch)
         logger.info(f"Beginning epoch {epoch}...")
         for x, y in loader:
-            if rank == 0:
-                print(f"entered trainstep {train_steps}, current time is {current_time()}")
+            # if rank == 0:
+            #     print(f"entered trainstep {train_steps} / {len(loader)}")
             x = x.to(device)
             y = y.to(device)
             with torch.no_grad():
                 # Map input images to latent space + normalize latents:
+                # print(f"pre vae, shape is {x.shape}")
                 x = vae.encode(x).latent_dist.sample().mul_(0.18215)
             t = torch.randint(0, diffusion.num_timesteps, (x.shape[0],), device=device)
             model_kwargs = dict(y=y)
-            # print("before entering", type(x), x)
+            # print("pre calculate loss", type(x), x.shape)
             loss_dict = diffusion.training_losses(model, x, t, model_kwargs)
             loss = loss_dict["loss"].mean()
             opt.zero_grad()
@@ -272,7 +276,10 @@ def main(args):
             running_loss += loss.item()
             log_steps += 1
             train_steps += 1
+
             if train_steps % args.log_every == 1:
+                if rank == 0:
+                    print(f"logging at step {train_steps}")
                 # Measure training speed:
                 torch.cuda.synchronize()
                 end_time = time()
@@ -298,7 +305,7 @@ def main(args):
             # Save DiT checkpoint:
             if train_steps % args.ckpt_every == 1: # and train_steps > 0:
                 if rank == 0:
-                    print(f"entered save {train_steps}, current time is {current_time()}")
+                    # print(f"entered save {train_steps}, current time is {current_time()}")
                     print(f"saving model at step {train_steps}")
                     checkpoint = {
                         "model": model.module.state_dict(),
@@ -309,12 +316,12 @@ def main(args):
                     checkpoint_path = f"{checkpoint_dir}/{train_steps:07d}.pt"
                     torch.save(checkpoint, checkpoint_path)
                     logger.info(f"Saved checkpoint to {checkpoint_path}")
-                    print(f"evaluating model at step {train_steps}")
+                    # print(f"evaluating model at step {train_steps}")
                     import sample_ddp
                     args.ckpt = checkpoint_path
                     # sample_ddp.main(args)
                     print(f"done saving model at step {train_steps}")
-                    print(f"done save {train_steps}, current time is {current_time()}")
+                    # print(f"done save {train_steps}, current time is {current_time()}")
 
                 dist.barrier()
     
@@ -328,7 +335,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-path", type=str, required=True)
     parser.add_argument("--results-dir", type=str, default="results")
-    parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-XL/2") # or DiT-B/4
+    parser.add_argument("--model", type=str, choices=list(DiT_DEQ_models.keys()), default="DiT-XL/2") # or DiT-B/4
     parser.add_argument("--image-size", type=int, choices=[64, 256, 512], default=256)
     parser.add_argument("--num-classes", type=int, default=1000)
     parser.add_argument("--epochs", type=int, default=2000)

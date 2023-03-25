@@ -66,7 +66,7 @@ def evaluation (model, args, sample_size = 16, sample_step = 250):
     # Sample images:
     samples = diffusion.p_sample_loop(
         model.forward_with_cfg, z.shape, z, clip_denoised=False, 
-        model_kwargs=model_kwargs, progress=True, device=device
+        model_kwargs=model_kwargs, progress=False, device=device
     )
     samples, _ = samples.chunk(2, dim=0)  # Remove null class samples
     samples = vae.decode(samples / 0.18215).sample
