@@ -38,107 +38,12 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 #################################################################################
 #                             Training Helper Functions                         #
 #################################################################################
-
-@torch.no_grad()
-def update_ema(ema_model, model, decay=0.9999):
-    """
-    Step the EMA model towards the current model.
-    """
-    ema_params = OrderedDict(ema_model.named_parameters())
-    model_params = OrderedDict(model.named_parameters())
-
-    for name, param in model_params.items():
-        # TODO: Consider applying only to params that require_grad to avoid small numerical changes of pos_embed
-        ema_params[name].mul_(decay).add_(param.data, alpha=1 - decay)
-
-
-def requires_grad(model, flag=True):
-    """
-    Set requires_grad flag for all parameters in a model.
-    """
-    for p in model.parameters():
-        p.requires_grad = flag
-
-
-def cleanup():
-    """
-    End DDP training.
-    """
-    dist.destroy_process_group()
-
-
-def create_logger(logging_dir):
-    """
-    Create a logger that writes to a log file and stdout.
-    """
-    if dist.get_rank() == 0:  # real logger
-        logging.basicConfig(
-            level=logging.INFO,
-            format='[\033[34m%(asctime)s\033[0m] %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S',
-            handlers=[logging.StreamHandler(), logging.FileHandler(f"{logging_dir}/log.txt")]
-        )
-        logger = logging.getLogger(__name__)
-    else:  # dummy logger (does nothing)
-        logger = logging.getLogger(__name__)
-        logger.addHandler(logging.NullHandler())
-    return logger
-
-
-def center_crop_arr(pil_image, image_size):
-    """
-    Center cropping implementation from ADM.
-    https://github.com/openai/guided-diffusion/blob/8fb3ad9197f16bbc40620447b2742e13458d2831/guided_diffusion/image_datasets.py#L126
-    """
-    while min(*pil_image.size) >= 2 * image_size:
-        pil_image = pil_image.resize(
-            tuple(x // 2 for x in pil_image.size), resample=Image.BOX
-        )
-
-    scale = image_size / min(*pil_image.size)
-    pil_image = pil_image.resize(
-        tuple(round(x * scale) for x in pil_image.size), resample=Image.BICUBIC
-    )
-
-    arr = np.array(pil_image)
-    crop_y = (arr.shape[0] - image_size) // 2
-    crop_x = (arr.shape[1] - image_size) // 2
-    return Image.fromarray(arr[crop_y: crop_y + image_size, crop_x: crop_x + image_size])
-
+from old_DiT.train import update_ema, requires_grad, cleanup, create_logger, center_crop_arr
 
 #################################################################################
 #                                  Training Loop                                #
 #################################################################################
-
-
-def sample_but_no_eval (args, model):
-    with torch.no_grad():
-        model.eval()  # important! This disables randomized embedding dropout
-        from eval import evaluation_large, save_images, compute_fid
-        images = evaluation_large(model.module, args, args.sample_size, args.sample_step)
-        from datetime import datetime
-        current_time = datetime.now().strftime('%b%d_%H-%M-%S')
-        import random
-        random_suffix = random.randint(0, 10000)
-        folder_name = f"figs/{current_time}_{random_suffix}"
-        save_images(images, folder_name)
-
-        # if "imagenet" in args.data_path:
-        #     from cleanfid import fid
-        #     fid_score = fid.compute_fid(folder_name, dataset_name="FFHQ", dataset_res=1024, dataset_split="trainval70k")
-        # elif 'ffhq' in args.data_path:
-        #     fid_score = fid.compute_kid(folder_name, dataset_name="ffhq", dataset_res=256, dataset_split="trainval70k")
-        # else:
-        #     fid_score = compute_fid(folder_name, args.data_path)
-        plot_images = images[:16]
-        # wandb.log({"sample": [wandb.Image(plot_images[i]) for i in range(16)]})
-    return plot_images
-    # print(f"in this evaluation, the fid score is {fid_score}")
-        
-def current_time():
-    # current time, to seconds
-    import datetime
-    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+from old_DiT.train import sample_but_no_eval, current_time
 
 def main(args):
     """
@@ -260,7 +165,6 @@ def main(args):
             y = y.to(device)
             with torch.no_grad():
                 # Map input images to latent space + normalize latents:
-                # print(f"pre vae, shape is {x.shape}")
                 x = vae.encode(x).latent_dist.sample().mul_(0.18215)
             t = torch.randint(0, diffusion.num_timesteps, (x.shape[0],), device=device)
             model_kwargs = dict(y=y)
@@ -316,12 +220,12 @@ def main(args):
                     checkpoint_path = f"{checkpoint_dir}/{train_steps:07d}.pt"
                     torch.save(checkpoint, checkpoint_path)
                     logger.info(f"Saved checkpoint to {checkpoint_path}")
-                    # print(f"evaluating model at step {train_steps}")
-                    import sample_ddp
+                    print(f"evaluating model at step {train_steps}")
+                    # import sample_ddp
                     args.ckpt = checkpoint_path
                     # sample_ddp.main(args)
                     print(f"done saving model at step {train_steps}")
-                    # print(f"done save {train_steps}, current time is {current_time()}")
+                    print(f"done save {train_steps}, current time is {current_time()}")
 
                 dist.barrier()
     
@@ -335,7 +239,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-path", type=str, required=True)
     parser.add_argument("--results-dir", type=str, default="results")
-    parser.add_argument("--model", type=str, choices=list(DiT_DEQ_models.keys()), default="DiT-XL/2") # or DiT-B/4
+    parser.add_argument("--model", type=str, choices=list(DiT_DEQ_models.keys()), default="DiT-DEQ-B/4") # or DiT-B/4
     parser.add_argument("--image-size", type=int, choices=[64, 256, 512], default=256)
     parser.add_argument("--num-classes", type=int, default=1000)
     parser.add_argument("--epochs", type=int, default=2000)

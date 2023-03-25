@@ -14,7 +14,6 @@ import os
 from cleanfid import fid
 
 import torch.distributed as dist
-from models import DiT_models
 from download import find_model
 from tqdm import tqdm
 import os

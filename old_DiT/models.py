@@ -17,6 +17,9 @@ from timm.models.vision_transformer import PatchEmbed, Attention, Mlp
 
 
 def modulate(x, shift, scale):
+    """
+    Input x and modulate with shift and scale.
+    """
     return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
 
 

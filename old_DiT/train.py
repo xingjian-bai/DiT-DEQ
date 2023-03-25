@@ -27,7 +27,7 @@ import argparse
 import logging
 import os
 import wandb
-from models import DiT_models
+from old_DiT.models import DiT_models
 from diffusion import create_diffusion
 from diffusers.models import AutoencoderKL
 
@@ -109,8 +109,6 @@ def center_crop_arr(pil_image, image_size):
 #################################################################################
 #                                  Training Loop                                #
 #################################################################################
-
-
 def sample_but_no_eval (args, model):
     with torch.no_grad():
         model.eval()  # important! This disables randomized embedding dropout

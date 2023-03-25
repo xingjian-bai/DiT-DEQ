@@ -1,10 +1,14 @@
+"""
+Repeated functions from deqlib/deqlib/old_DiT/models.py are imported.
+"""
 import torch
 import torch.nn as nn
 import numpy as np
 import math
 from timm.models.vision_transformer import PatchEmbed, Attention, Mlp
 
-from models import *
+from old_DiT.models import TimestepEmbedder, modulate, LabelEmbedder, FinalLayer
+from old_DiT.models import get_2d_sincos_pos_embed
 import deqlib.deqlib as deqlib
 
 """
@@ -32,32 +36,27 @@ class DiTDEQBlock(nn.Module):
         )
     
     def equip_c (self, c):
+        """
+        This function is used to equip the block with the conditioning vector c.
+        It cannot be passed as a parameter to the forward function because the forward function is called by the DEQ solver.
+        So the fix is: "equip" the block with the conditioning vector c, and then use it in the forward function.
+        """
         self.c = c
 
-    def forward(self, x):
-        T_SIZE = 64
-        D_SIZE = 768
-        # assert xc.shape[1] == 2 * T_SIZE * D_SIZE
-        # # xc: (B, 2 * T * D)
-        # x, c = xc.chunk(2, dim=-1) # x: (B, T * D), c: (B, T * D)
-        # # change c back to (B, T, D)
-        # c = c.reshape(c.shape[0], T_SIZE, D_SIZE)
-        # # take a piece of size (B, 1, D) from c
-        # c = c[:, 0, :]
-        # # change c back to (B, D)
-        # c = c.reshape(c.shape[0], D_SIZE)
-        # # change x back to (B, T, D)
-        # x = x.reshape(x.shape[0], T_SIZE, D_SIZE)
-        # print(f"aft pre-processing, shapes are {x.shape}, {c.shape}")
+    def forward(self, x): # x: (B, T * D)
+        """
+        The forward of DiTDEQBlock is the function that we pass to the DEQ solver.
+        Let's call it F_c. F_c is a function from R^(B * T * D) to R^(B * T * D).
+        ALERT: I did it in this way because 'c' does not change during the DEQ iterations. is this correct???
+        """
+        T_SIZE = 64 
+        D_SIZE = 768 
 
-        # change the shape of x to (B, T, D)
-        x = x.reshape(x.shape[0], T_SIZE, D_SIZE)
+        x = x.reshape(x.shape[0], T_SIZE, D_SIZE) # (B, T, D)
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(self.c).chunk(6, dim=1)
         # print(f"current line 1")
         x = x + gate_msa.unsqueeze(1) * self.attn(modulate(self.norm1(x), shift_msa, scale_msa))
-        # print(f"current line 2")
         x = x + gate_mlp.unsqueeze(1) * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp))
-        # print(f"shape of x output in func.FORWARD: {x.shape}")
         
         # change the shape of x back to (B, T * D)
         x = x.reshape(x.shape[0], T_SIZE * D_SIZE)
@@ -69,7 +68,7 @@ class DiT_DEQ(nn.Module):
     """
     def __init__(
         self,
-        input_size=32,
+        input_size=32, # because 256 / 8 = 32
         patch_size=2,
         in_channels=4,
         hidden_size=1152,
@@ -167,23 +166,10 @@ class DiT_DEQ(nn.Module):
         x = self.x_embedder(x) + self.pos_embed  # (N, T, D), where T = H * W / patch_size ** 2
         t = self.t_embedder(t)                   # (N, D)
         y = self.y_embedder(y, self.training)    # (N, D)
-        c = t + y                                # (N, D)
+        c = t + y                                # (N, D) TODO this is the original way to do it. Is it still suitable?
 
-        # broadcast c to match x's shape
-        # c = c.unsqueeze(1)                       # (N, 1, D)
-        # c = c.expand(-1, x.shape[1], -1)         # (N, T, D)
-        # add together x and c by concatenating them along the last dimension
-        # print(f"before concat, shapes of x, c: {x.shape}, {c.shape}")
-        # xc = torch.cat([x, c], dim=-1)           # (N, T, 2 * D)
-        # print(f"in DEQ forward, changing x, c, xc shapes to: {x.shape}, {c.shape}, {xc.shape}")
-        # for block in self.blocks:
-        #     x = block(x, c)                      # (N, T, D)
-        # print(f"in depq_models forward, pre deq", f"shapes of x, c: {x.shape}, {c.shape}")
         self.block.equip_c(c)
-        x, x_stars, info = self.deq(self.block, x)
-        # print(f"types of the output of deq: {type(x_star)}, {type(x_stars)}, {type(info)}")
-        # print(f"values of the output of deq: {x_star.shape}, {x_stars.shape}, {info}")
-        # print(f"in depq_models forward, aft deq")
+        x, _, _ = self.deq(self.block, x)       # (N, T, D)
         x = self.final_layer(x, c)                # (N, T, patch_size ** 2 * out_channels)
         x = self.unpatchify(x)                   # (N, out_channels, H, W)
         return x
@@ -205,61 +191,6 @@ class DiT_DEQ(nn.Module):
         half_eps = uncond_eps + cfg_scale * (cond_eps - uncond_eps)
         eps = torch.cat([half_eps, half_eps], dim=0)
         return torch.cat([eps, rest], dim=1)
-
-
-#################################################################################
-#                   Sine/Cosine Positional Embedding Functions                  #
-#################################################################################
-# https://github.com/facebookresearch/mae/blob/main/util/pos_embed.py
-
-def get_2d_sincos_pos_embed(embed_dim, grid_size, cls_token=False, extra_tokens=0):
-    """
-    grid_size: int of the grid height and width
-    return:
-    pos_embed: [grid_size*grid_size, embed_dim] or [1+grid_size*grid_size, embed_dim] (w/ or w/o cls_token)
-    """
-    grid_h = np.arange(grid_size, dtype=np.float32)
-    grid_w = np.arange(grid_size, dtype=np.float32)
-    grid = np.meshgrid(grid_w, grid_h)  # here w goes first
-    grid = np.stack(grid, axis=0)
-
-    grid = grid.reshape([2, 1, grid_size, grid_size])
-    pos_embed = get_2d_sincos_pos_embed_from_grid(embed_dim, grid)
-    if cls_token and extra_tokens > 0:
-        pos_embed = np.concatenate([np.zeros([extra_tokens, embed_dim]), pos_embed], axis=0)
-    return pos_embed
-
-
-def get_2d_sincos_pos_embed_from_grid(embed_dim, grid):
-    assert embed_dim % 2 == 0
-
-    # use half of dimensions to encode grid_h
-    emb_h = get_1d_sincos_pos_embed_from_grid(embed_dim // 2, grid[0])  # (H*W, D/2)
-    emb_w = get_1d_sincos_pos_embed_from_grid(embed_dim // 2, grid[1])  # (H*W, D/2)
-
-    emb = np.concatenate([emb_h, emb_w], axis=1) # (H*W, D)
-    return emb
-
-
-def get_1d_sincos_pos_embed_from_grid(embed_dim, pos):
-    """
-    embed_dim: output dimension for each position
-    pos: a list of positions to be encoded: size (M,)
-    out: (M, D)
-    """
-    assert embed_dim % 2 == 0
-    omega = np.arange(embed_dim // 2, dtype=np.float64)
-    omega /= embed_dim / 2.
-    omega = 1. / 10000**omega  # (D/2,)
-
-    pos = pos.reshape(-1)  # (M,)
-    out = np.einsum('m,d->md', pos, omega)  # (M, D/2), outer product
-
-    emb_sin = np.sin(out) # (M, D/2)
-    emb_cos = np.cos(out) # (M, D/2)
-
-    emb = np.concatenate([emb_sin, emb_cos], axis=1)  # (M, D)
-    return emb
 
 
 #################################################################################
