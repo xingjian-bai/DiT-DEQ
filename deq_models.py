@@ -10,7 +10,7 @@ import deqlib.deqlib as deqlib
 """
 Important changes:
 1. In the DiTBlock, replace the transformer block with the DEQ versions
-2. combine x and c into a single input (with double the channel!!) into the DEQ block
+2. combine x and c into a single input (double the channel number!) into the DEQ block
 """
 
 class DiTDEQBlock(nn.Module):
