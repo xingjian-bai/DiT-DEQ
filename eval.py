@@ -77,7 +77,7 @@ def evaluation (model, args, sample_size = 16, sample_step = 250):
 def evaluation_large (model, args, sample_size = 512, sample_step = 250):
     samples = []
 
-    batch_size = 16
+    batch_size = 8
     assert sample_size % batch_size == 0
     for i in range (0, sample_size, batch_size):
         samples.append(evaluation(model, args, batch_size, sample_step))

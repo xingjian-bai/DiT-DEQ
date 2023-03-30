@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --time=12:00:00
-#SBATCH --partition=ddp-4-way
+#SBATCH --partition=ddp-4way
 #SBATCH --mem=100G
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:4
@@ -15,6 +15,5 @@ time torchrun --nnodes=1 --nproc_per_node=4 deq_train.py \
   --data-path /scratch/shared/beegfs/shared-datasets/ImageNet/ILSVRC12/train/ --image-size 256 \
   --num-classes 1000 \
   --log-every 100 --ckpt-every 1000 \
-  --wandb
+#   --wandb
 echo “Job completed.”
-

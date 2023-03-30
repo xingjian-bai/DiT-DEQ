@@ -28,12 +28,36 @@ torchrun --nnodes=1 --nproc_per_node=4 deq_train.py \
 
 
 # imagenet
-torchrun --nnodes=1 --nproc_per_node=2 train.py \
-  --sample-step 1000 --sample-size 64 \
-  --epochs 2000 --model DiT-B/4 \
+torchrun --nnodes=1 --nproc_per_node=1 deq_train.py \
+  --sample-step 1000 --sample-size 8 --global-batch-size 128\
+  --epochs 2000 --model DiT-DEQ-S/8\
   --data-path /scratch/shared/beegfs/shared-datasets/ImageNet/ILSVRC12/train/ --image-size 256 \
   --num-classes 1000 \
-  --log-every 500 --ckpt-every 2000 
+  --log-every 100 --ckpt-every 1000 \
+  --wandb
+# DiT-DEQ-S/8
+
+###################
+#!/bin/bash
+#SBATCH --time=12:00:00
+#SBATCH --partition=ddp-4-way
+#SBATCH --mem=100G
+#SBATCH --nodes=1
+#SBATCH --gres=gpu:4
+#SBATCH --cpus-per-task=12
+
+gpustat
+date
+echo “Job started.”
+time torchrun --nnodes=1 --nproc_per_node=4 deq_train.py \
+  --sample-step 1000 --sample-size 8 --global-batch-size 128\
+  --epochs 2000 --model DiT-S/8 \
+  --data-path /scratch/shared/beegfs/shared-datasets/ImageNet/ILSVRC12/train/ --image-size 256 \
+  --num-classes 1000 \
+  --log-every 100 --ckpt-every 1000 \
+  --wandb
+echo “Job completed.”
+###################
 
 
 # eval
@@ -47,9 +71,9 @@ srun --ntasks=1 --time=48:00:00 --cpus-per-task=12 --partition=gpu \
  --pty --gres=gpu:4 --constraint=gmem48G --nodelist=gnodel2 /bin/zsh
 
 srun --ntasks=1 --time=48:00:00 --cpus-per-task=12 --partition=gpu \
-  --mem=50G --pty --gres=gpu:4 --constraint=gmem48G /bin/zsh
+  --mem=100G --pty --gres=gpu:4 --constraint=gmem48G /bin/zsh
 
-srun --ntasks=1 --time=48:00:00 --cpus-per-task=12 --partition=gpu \
-  --mem=50G --pty --gres=gpu:1 --constraint=gmem48G /bin/zsh
+srun --ntasks=1 --time=24:00:00 --cpus-per-task=12 --partition=ddp-4way \
+  --mem=50G --pty /bin/zsh
 
 

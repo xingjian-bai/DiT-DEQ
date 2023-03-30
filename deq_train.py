@@ -1,9 +1,3 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-
 """
 A minimal training script for DiT using PyTorch DDP.
 """
@@ -27,27 +21,18 @@ import argparse
 import logging
 import os
 import wandb
-from deq_models import DiT_DEQ_models
+from deq_models import DiT_models
 from diffusion import create_diffusion
 from diffusers.models import AutoencoderKL
 
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning) 
 
-
-#################################################################################
-#                             Training Helper Functions                         #
-#################################################################################
-from old_DiT.train import update_ema, requires_grad, cleanup, create_logger, center_crop_arr
-
-#################################################################################
-#                                  Training Loop                                #
-#################################################################################
-from old_DiT.train import sample_but_no_eval, current_time
+from utils import update_ema, requires_grad, cleanup, create_logger, center_crop_arr, sample_but_no_eval, current_time
 
 def main(args):
     """
-    Trains a new DiT-DEQ model.
+    Trains a new DiT model.
     """
     assert torch.cuda.is_available(), "Training currently requires at least one GPU."
 
@@ -80,20 +65,23 @@ def main(args):
     # Create model:
     assert args.image_size % 8 == 0, "Image size must be divisible by 8 (for the VAE encoder)."
     latent_size = args.image_size // 8
-    # model = DiT_models[args.model](
-    #     input_size=latent_size,
-    #     num_classes=args.num_classes
-    # )
-    model = DiT_DEQ_models[args.model](
+
+    
+    model = DiT_models[args.model](
         input_size=latent_size,
         num_classes=args.num_classes
     )
+    print(f"dit model created...")
     # Note that parameter initialization is done within the DiT constructor
     ema = deepcopy(model).to(device)  # Create an EMA of the model for use after training
     requires_grad(ema, False)
+    print(f"dit model ema created...")
     model = DDP(model.to(device), device_ids=[rank], find_unused_parameters=True)
+    print(f"dit model distributed...")
     diffusion = create_diffusion(timestep_respacing="")  # default: 1000 steps, linear noise schedule
+    print(f"diffusion created...")
     vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
+    print(f"vae created...")
     logger.info(f"DiT Parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     # Setup optimizer (we used default Adam betas=(0.9, 0.999) and a constant learning rate of 1e-4 in our paper):
@@ -108,11 +96,8 @@ def main(args):
     ])
 
     if "ImageNet" in args.data_path:
-        from torchvision.datasets import ImageNet
-
+        # from torchvision.datasets import ImageNet
         # dataset = ImageNet(args.data_path, split="train", transform=transform)
-        # from imagenet_dataset import ImageNet
-        # dataset = ImageNet(args.data_path, transform=transform)
         dataset = ImageFolder(args.data_path, transform=transform)
         print(f"loaded imagenet with {len(dataset)} images")
     else:
@@ -153,14 +138,10 @@ def main(args):
         if rank == 0:
             print(f"entered epoch {epoch}, current time {current_time()}")
         
-        # if epoch % 10 == 0 and rank == 0:
 
         model.train()  # important! This enables embedding dropout for classifier-free guidance
         sampler.set_epoch(epoch)
-        logger.info(f"Beginning epoch {epoch}...")
         for x, y in loader:
-            # if rank == 0:
-            #     print(f"entered trainstep {train_steps} / {len(loader)}")
             x = x.to(device)
             y = y.to(device)
             with torch.no_grad():
@@ -181,9 +162,10 @@ def main(args):
             log_steps += 1
             train_steps += 1
 
+            if rank == 0 and train_steps % 10 == 0:
+                print(f"At trainstep {train_steps}, {current_time()}.")
+
             if train_steps % args.log_every == 1:
-                if rank == 0:
-                    print(f"logging at step {train_steps}")
                 # Measure training speed:
                 torch.cuda.synchronize()
                 end_time = time()
@@ -197,20 +179,18 @@ def main(args):
 
                 logger.info(f"(step={train_steps:07d}) Train Loss: {avg_loss:.4f}, Train Steps/Sec: {steps_per_sec:.2f}")
                 if rank == 0 and args.wandb:
-                    wandb.log({"train_loss": avg_loss, "train_steps_per_sec": steps_per_sec, "step": train_steps, "epoch": epoch, "images": [wandb.Image(plotted_images[i]) for i in range(16)]})
+                    wandb.log({"train_loss": avg_loss, "train_steps_per_sec": steps_per_sec, "train_step": train_steps, "epoch": epoch, "images": [wandb.Image(plotted_images[i]) for i in range(8)]})
                 # Reset monitoring variables:
                 running_loss = 0
                 log_steps = 0
                 start_time = time()
 
-                # Save model checkpoints:
-                
 
             # Save DiT checkpoint:
             if train_steps % args.ckpt_every == 1: # and train_steps > 0:
                 if rank == 0:
                     # print(f"entered save {train_steps}, current time is {current_time()}")
-                    print(f"saving model at step {train_steps}")
+                    print(f"at trainstep {train_steps}, saving.")
                     checkpoint = {
                         "model": model.module.state_dict(),
                         "ema": ema.state_dict(),
@@ -224,8 +204,8 @@ def main(args):
                     # import sample_ddp
                     args.ckpt = checkpoint_path
                     # sample_ddp.main(args)
-                    print(f"done saving model at step {train_steps}")
-                    print(f"done save {train_steps}, current time is {current_time()}")
+                    # print(f"done saving model at step {train_steps}")
+                    # print(f"done save {train_steps}, current time is {current_time()}")
 
                 dist.barrier()
     
@@ -237,9 +217,10 @@ def main(args):
 if __name__ == "__main__":
     # Default args here will train DiT-XL/2 with the hyperparameters we used in our paper (except training iters).
     parser = argparse.ArgumentParser()
+
     parser.add_argument("--data-path", type=str, required=True)
     parser.add_argument("--results-dir", type=str, default="results")
-    parser.add_argument("--model", type=str, choices=list(DiT_DEQ_models.keys()), default="DiT-DEQ-B/4") # or DiT-B/4
+    parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-DEQ-B/4") # or DiT-B/4
     parser.add_argument("--image-size", type=int, choices=[64, 256, 512], default=256)
     parser.add_argument("--num-classes", type=int, default=1000)
     parser.add_argument("--epochs", type=int, default=2000)
