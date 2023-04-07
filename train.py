@@ -137,7 +137,8 @@ def main(args):
         os.makedirs(checkpoint_dir, exist_ok=True)
         logger = create_logger(experiment_dir)
         logger.info(f"Experiment directory created at {experiment_dir}")
-        wandb.init(project="DiT-self-trained",entity="xingjian-bai",config=args, name=args.model + args.sig)
+        if args.wandb:
+            wandb.init(project="DiT-self-trained",entity="xingjian-bai",config=args, name=args.model + args.sig)
     else:
         # print('in else')
         logger = create_logger(None)
@@ -239,7 +240,8 @@ def main(args):
                 avg_loss = avg_loss.item() / dist.get_world_size()
                 logger.info(f"(step={train_steps:07d}) Train Loss: {avg_loss:.4f}, Train Steps/Sec: {steps_per_sec:.2f}")
                 if rank == 0:
-                    wandb.log({"train_loss": avg_loss, "train_steps_per_sec": steps_per_sec, "train_step": train_steps})
+                    if args.wandb:
+                        wandb.log({"train_loss": avg_loss, "train_steps_per_sec": steps_per_sec, "train_step": train_steps})
                 # Reset monitoring variables:
                 running_loss = 0
                 log_steps = 0
@@ -282,5 +284,6 @@ if __name__ == "__main__":
     parser.add_argument("--log-every", type=int, default=100)
     parser.add_argument("--ckpt-every", type=int, default=50_000)
     parser.add_argument("--sig", type=str, default="")
+    parser.add_argument("--wandb", action="store_true", default=False)
     args = parser.parse_args()
     main(args)

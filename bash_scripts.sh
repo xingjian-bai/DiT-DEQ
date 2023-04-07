@@ -61,7 +61,13 @@ torchrun --nnodes=1 --nproc_per_node=2 sample_ddp.py \
 
 
 # srun
-srun --ntasks=1 --time=48:00:00 --cpus-per-task=12 --partition=ddp-2way \
+srun --ntasks=1 --time=48:00:00 --cpus-per-task=12 --partition=gpu \
+ --pty --gres=gpu:4 --constraint=gmem48G /bin/zsh
+
+srun --ntasks=1 --time=48:00:00 --cpus-per-task=12 --partition=gpu \
+ --pty --gres=gpu:4 --constraint=gmem48G /bin/zsh
+
+srun --ntasks=1 --time=48:00:00 --cpus-per-task=12 --partition=gpu \
  --pty --gres=gpu:4 --constraint=gmem48G /bin/zsh
 
 srun --ntasks=1 --time=48:00:00 --cpus-per-task=12 --partition=low-prio-gpu \
@@ -79,3 +85,11 @@ torchrun --nnodes=1 --nproc_per_node=1 deq_train.py \
   --wandb
 
 torchrun --nnodes=1 --nproc_per_node=4 --master_port 28473 train.py --model DiT-S/8 --data-path /scratch/shared/beegfs/shared-datasets/ImageNet/ILSVRC12/train/
+
+
+###
+torchrun --nnodes=1 --nproc_per_node=4 --master_port 28473 train.py \
+ --model DiT-DEQ-S/8 \
+ --data-path /scratch/shared/beegfs/shared-datasets/ImageNet/ILSVRC12/train/ \
+ --sig DEQ_0_40_try0 \
+ --wandb

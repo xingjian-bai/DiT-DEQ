@@ -15,6 +15,8 @@ import numpy as np
 import math
 from timm.models.vision_transformer import PatchEmbed, Attention, Mlp
 
+import deqlib.deqlib as deqlib
+
 
 def modulate(x, shift, scale):
     return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
@@ -114,11 +116,59 @@ class DiTBlock(nn.Module):
             nn.SiLU(),
             nn.Linear(hidden_size, 6 * hidden_size, bias=True)
         )
+        self.hidden_size = hidden_size
 
     def forward(self, x, c):
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(c).chunk(6, dim=1)
         x = x + gate_msa.unsqueeze(1) * self.attn(modulate(self.norm1(x), shift_msa, scale_msa))
         x = x + gate_mlp.unsqueeze(1) * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp))
+        return x
+    
+class DiTDEQBlock(nn.Module):
+    """
+    A DiT DEQ block with adaptive layer norm zero (adaLN-Zero) conditioning.
+    only change the input from x and c to xc
+    """
+    def __init__(self, hidden_size, num_heads, mlp_ratio=4.0, **block_kwargs):
+        super().__init__()
+        # self.DiT = DiTBlock(hidden_size, num_heads, mlp_ratio, **block_kwargs)
+        self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
+        self.attn = Attention(hidden_size, num_heads=num_heads, qkv_bias=True, **block_kwargs)
+        self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
+        mlp_hidden_dim = int(hidden_size * mlp_ratio)
+        approx_gelu = lambda: nn.GELU(approximate="tanh")
+        self.mlp = Mlp(in_features=hidden_size, hidden_features=mlp_hidden_dim, act_layer=approx_gelu, drop=0)
+        self.adaLN_modulation = nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(hidden_size, 6 * hidden_size, bias=True)
+        )
+        self.hidden_size = hidden_size
+    
+    def equip_c (self, c):
+        """
+        This function is used to equip the block with the conditioning vector c.
+        It cannot be passed as a parameter to the forward function because the forward function is called by the DEQ solver.
+        So the fix is: "equip" the block with the conditioning vector c, and then use it in the forward function.
+        """
+        self.c = c
+
+    def forward(self, x): # x: (B, T * D)
+        """
+        The forward of DiTDEQBlock is the function that we pass to the DEQ solver.
+        Let's call it F_c. F_c is a function from R^(B * T * D) to R^(B * T * D).
+        ALERT: I did it in this way because 'c' does not change during the DEQ iterations. is this correct???
+        """
+        D_SIZE = self.hidden_size # 768 in B
+        T_SIZE = x.shape[1] // D_SIZE # 64 in B
+
+        x = x.reshape(x.shape[0], T_SIZE, D_SIZE) # (B, T, D)
+        
+        # x = self.DiT(x, self.c) # (B, T, D)
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(self.c).chunk(6, dim=1)
+        x = x + gate_msa.unsqueeze(1) * self.attn(modulate(self.norm1(x), shift_msa, scale_msa))
+        x = x + gate_mlp.unsqueeze(1) * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp))
+
+        x = x.reshape(x.shape[0], T_SIZE * D_SIZE)
         return x
 
 
@@ -158,8 +208,10 @@ class DiT(nn.Module):
         class_dropout_prob=0.1,
         num_classes=1000,
         learn_sigma=True,
+        deq_mode = None
     ):
         super().__init__()
+        self.deq_mode = deq_mode
         self.learn_sigma = learn_sigma
         self.in_channels = in_channels
         self.out_channels = in_channels * 2 if learn_sigma else in_channels
@@ -173,9 +225,17 @@ class DiT(nn.Module):
         # Will use fixed sin-cos embedding:
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, hidden_size), requires_grad=False)
 
-        self.blocks = nn.ModuleList([
-            DiTBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio) for _ in range(depth)
-        ])
+        if deq_mode == None:
+            self.blocks = nn.ModuleList([
+                DiTBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio) for _ in range(depth)
+            ])
+        elif deq_mode == "simulate_repeat":
+            print(f"this model uses DEQ to simulate {depth} repeats")
+            self.deq = deqlib.DEQ(f_max = 0, n_losses = depth)
+            self.block = DiTDEQBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio)
+        else:
+            raise ValueError("deq_mode must be None or 'simulate_repeat'")
+
         self.final_layer = FinalLayer(hidden_size, patch_size, self.out_channels)
         self.initialize_weights()
 
@@ -205,9 +265,16 @@ class DiT(nn.Module):
         nn.init.normal_(self.t_embedder.mlp[2].weight, std=0.02)
 
         # Zero-out adaLN modulation layers in DiT blocks:
-        for block in self.blocks:
-            nn.init.constant_(block.adaLN_modulation[-1].weight, 0)
-            nn.init.constant_(block.adaLN_modulation[-1].bias, 0)
+        
+        if self.deq_mode == None:
+            for block in self.blocks:
+                nn.init.constant_(block.adaLN_modulation[-1].weight, 0)
+                nn.init.constant_(block.adaLN_modulation[-1].bias, 0)
+        elif self.deq_mode == "simulate_repeat":
+            nn.init.constant_(self.block.adaLN_modulation[-1].weight, 0)
+            nn.init.constant_(self.block.adaLN_modulation[-1].bias, 0)
+        else:
+            raise ValueError("deq_mode must be None or 'simulate_repeat'")
 
         # Zero-out output layers:
         nn.init.constant_(self.final_layer.adaLN_modulation[-1].weight, 0)
@@ -241,8 +308,15 @@ class DiT(nn.Module):
         t = self.t_embedder(t)                   # (N, D)
         y = self.y_embedder(y, self.training)    # (N, D)
         c = t + y                                # (N, D)
-        for block in self.blocks:
-            x = block(x, c)                      # (N, T, D)
+
+        if self.deq_mode == None:
+            for block in self.blocks:
+                x = block(x, c)                      # (N, T, D)
+        elif self.deq_mode == "simulate_repeat":
+            self.block.equip_c(c)
+            x, _, _ = self.deq(self.block, x)       # (N, T, D)
+        else:
+            raise ValueError("deq_mode must be None or 'simulate_repeat'")
         x = self.final_layer(x, c)                # (N, T, patch_size ** 2 * out_channels)
         x = self.unpatchify(x)                   # (N, out_channels, H, W)
         return x
@@ -361,10 +435,15 @@ def DiT_S_4(**kwargs):
 def DiT_S_8(**kwargs):
     return DiT(depth=12, hidden_size=384, patch_size=8, num_heads=6, **kwargs)
 
+def DiT_DEQ_S_8(**kwargs):
+    return DiT(deq_mode = "simulate_repeat", depth=12, hidden_size=384, patch_size=8, num_heads=6, **kwargs)
+
+
 
 DiT_models = {
     'DiT-XL/2': DiT_XL_2,  'DiT-XL/4': DiT_XL_4,  'DiT-XL/8': DiT_XL_8,
     'DiT-L/2':  DiT_L_2,   'DiT-L/4':  DiT_L_4,   'DiT-L/8':  DiT_L_8,
     'DiT-B/2':  DiT_B_2,   'DiT-B/4':  DiT_B_4,   'DiT-B/8':  DiT_B_8,
     'DiT-S/2':  DiT_S_2,   'DiT-S/4':  DiT_S_4,   'DiT-S/8':  DiT_S_8,
+    'DiT-DEQ-S/8': DiT_DEQ_S_8,
 }
