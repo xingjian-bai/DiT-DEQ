@@ -231,7 +231,7 @@ class DiT(nn.Module):
             ])
         elif deq_mode == "simulate_repeat":
             print(f"this model uses DEQ to simulate {depth} repeats")
-            self.deq = deqlib.DEQ(f_max = 0, n_losses = depth)
+            self.deq = deqlib.DEQ(n_losses = 1, f_max = depth, b_solver="backprop")
             self.block = DiTDEQBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio)
         else:
             raise ValueError("deq_mode must be None or 'simulate_repeat'")

@@ -241,7 +241,19 @@ def main(args):
                 logger.info(f"(step={train_steps:07d}) Train Loss: {avg_loss:.4f}, Train Steps/Sec: {steps_per_sec:.2f}")
                 if rank == 0:
                     if args.wandb:
-                        wandb.log({"train_loss": avg_loss, "train_steps_per_sec": steps_per_sec, "train_step": train_steps})
+                        if args.sample:
+                            def sample(args, model):
+                                with torch.no_grad():
+                                    model.eval()  # important! This disables randomized embedding dropout
+                                    from eval import evaluation_large
+                                    images = evaluation_large(model.module, args, sample_size = args.sample_size, sample_step = args.sample_step)
+                                return images
+                                # print(f"in this evaluation, the fid score is {fid_score}")
+                            images = sample(args, model)
+                            model.train()
+                            wandb.log({"train_loss": avg_loss, "train_steps_per_sec": steps_per_sec, "train_step": train_steps, "images": [wandb.Image(images[i]) for i in range(args.sample_size)]})
+                        else:
+                            wandb.log({"train_loss": avg_loss, "train_steps_per_sec": steps_per_sec, "train_step": train_steps})
                 # Reset monitoring variables:
                 running_loss = 0
                 log_steps = 0
@@ -281,9 +293,14 @@ if __name__ == "__main__":
     parser.add_argument("--global-seed", type=int, default=0)
     parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")  # Choice doesn't affect training
     parser.add_argument("--num-workers", type=int, default=4)
-    parser.add_argument("--log-every", type=int, default=100)
+    parser.add_argument("--log-every", type=int, default=300)
     parser.add_argument("--ckpt-every", type=int, default=50_000)
     parser.add_argument("--sig", type=str, default="")
     parser.add_argument("--wandb", action="store_true", default=False)
+
+
+    parser.add_argument("--sample", action="store_true", default=False)
+    parser.add_argument("--sample-size", type=int, default=8)
+    parser.add_argument("--sample-step", type=int, default=250)
     args = parser.parse_args()
     main(args)

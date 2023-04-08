@@ -64,8 +64,8 @@ torchrun --nnodes=1 --nproc_per_node=2 sample_ddp.py \
 srun --ntasks=1 --time=48:00:00 --cpus-per-task=12 --partition=gpu \
  --pty --gres=gpu:4 --constraint=gmem48G /bin/zsh
 
-srun --ntasks=1 --time=48:00:00 --cpus-per-task=12 --partition=gpu \
- --pty --gres=gpu:4 --constraint=gmem48G /bin/zsh
+srun --ntasks=1 --time=48:00:00 --cpus-per-task=12 --partition=ddp-2way \
+ --pty --gres=gpu:2 --constraint=gmem48G /bin/zsh
 
 srun --ntasks=1 --time=48:00:00 --cpus-per-task=12 --partition=gpu \
  --pty --gres=gpu:4 --constraint=gmem48G /bin/zsh
@@ -91,5 +91,22 @@ torchrun --nnodes=1 --nproc_per_node=4 --master_port 28473 train.py --model DiT-
 torchrun --nnodes=1 --nproc_per_node=4 --master_port 28473 train.py \
  --model DiT-DEQ-S/8 \
  --data-path /scratch/shared/beegfs/shared-datasets/ImageNet/ILSVRC12/train/ \
- --sig DEQ_0_40_try0 \
- --wandb
+ --sig DEQ_simulate_correct1 \
+ --wandb \
+ --log-every 100
+
+ torchrun --nnodes=1 --nproc_per_node=4 --master_port 28473 train.py \
+ --model DiT-DEQ-S/8 \
+ --data-path /scratch/shared/beegfs/shared-datasets/ImageNet/ILSVRC12/train/ \
+ --sig DEQ_simulate_correct1_with_sample \
+ --wandb \
+ --sample
+
+
+ torchrun --nnodes=1 --nproc_per_node=2 --master_port 28473 train.py \
+ --model DiT-S/8 \
+ --data-path /scratch/shared/beegfs/shared-datasets/ImageNet/ILSVRC12/train/ \
+ --sig DEQ_plain_correct2_with_sample \
+ --wandb \
+ --sample
+
