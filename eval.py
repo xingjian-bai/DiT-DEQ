@@ -35,7 +35,7 @@ def compute_fid (sample_folder, dataset_folder):
     score = fid.compute_fid(dataset_folder, sample_folder)
     return score
 
-def evaluation (model, args, sample_size = 16, sample_step = 250):
+def evaluation (model, args, sample_size = 8, sample_step = 250):
     model.eval()
 
     image_size = args.image_size
@@ -80,9 +80,12 @@ def evaluation (model, args, sample_size = 16, sample_step = 250):
 def evaluation_large (model, args, sample_size = 512, sample_step = 250):
     samples = []
 
+    if sample_size < 8:
+        return evaluation(model, args, sample_size, sample_step)
+
     batch_size = 8
     assert sample_size % batch_size == 0
-    for i in range (0, sample_size, batch_size):
+    for _ in range (0, sample_size, batch_size):
         samples.append(evaluation(model, args, batch_size, sample_step))
     samples = torch.cat(samples, dim=0)
     # print("shape: ", samples.shape)

@@ -138,7 +138,7 @@ def main(args):
         logger = create_logger(experiment_dir)
         logger.info(f"Experiment directory created at {experiment_dir}")
         if args.wandb:
-            wandb.init(project="DiT-self-trained",entity="xingjian-bai",config=args, name=args.model + args.sig)
+            wandb.init(project="DiT-self-trained",entity="xingjian-bai",config=args, name=args.sig)
     else:
         # print('in else')
         logger = create_logger(None)
@@ -239,6 +239,7 @@ def main(args):
                 dist.all_reduce(avg_loss, op=dist.ReduceOp.SUM)
                 avg_loss = avg_loss.item() / dist.get_world_size()
                 logger.info(f"(step={train_steps:07d}) Train Loss: {avg_loss:.4f}, Train Steps/Sec: {steps_per_sec:.2f}")
+                print(f"checking random number generation: {torch.randn(5)}")
                 if rank == 0:
                     if args.wandb:
                         if args.sample:
@@ -251,7 +252,7 @@ def main(args):
                                 # print(f"in this evaluation, the fid score is {fid_score}")
                             images = sample(args, model)
                             model.train()
-                            wandb.log({"train_loss": avg_loss, "train_steps_per_sec": steps_per_sec, "train_step": train_steps, "images": [wandb.Image(images[i]) for i in range(args.sample_size)]})
+                            wandb.log({"train_loss": avg_loss, "train_steps_per_sec": steps_per_sec, "train_step": train_steps, "images": [wandb.Image(image) for image in images]})
                         else:
                             wandb.log({"train_loss": avg_loss, "train_steps_per_sec": steps_per_sec, "train_step": train_steps})
                 # Reset monitoring variables:
