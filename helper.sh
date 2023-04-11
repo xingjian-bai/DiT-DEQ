@@ -11,25 +11,13 @@ gpustat
 date
 echo “Job started.”
 
-# torchrun --nnodes=1 --nproc_per_node=2 --master_port 28473 train.py \
-#  --model DiT-S/8 \
-#  --data-path /scratch/shared/beegfs/shared-datasets/ImageNet/ILSVRC12/train/ \
-#  --sig DiT-sample4-rnd \
-#  --wandb \
-#  --sample --sample-size 4
+#coupled:
+# torchrun --nnodes=1 --nproc_per_node=2 --master_port 28473 train.py --model DiT-S/8     --data-path /scratch/shared/beegfs/shared-datasets/ImageNet/ILSVRC12/train/ --sig DiT-nosample --wandb 
+torchrun --nnodes=1 --nproc_per_node=2 --master_port 28473 train.py --model DiT-DEQ-S/8 --data-path /scratch/shared/beegfs/shared-datasets/ImageNet/ILSVRC12/train/ --sig DEQ-nosample --wandb 
 
 
-# torchrun --nnodes=1 --nproc_per_node=2 --master_port 28473 train.py \
-#  --model DiT-DEQ-S/8 \
-#  --data-path /scratch/shared/beegfs/shared-datasets/ImageNet/ILSVRC12/train/ \
-#  --sig DEQ-simulate-nosample-200layers\
-#  --wandb \
-
-# torchrun --nnodes=1 --nproc_per_node=2 --master_port 28473 train.py \
-#  --model DiT-S/8 \
-#  --data-path /scratch/shared/beegfs/shared-datasets/ImageNet/ILSVRC12/train/ \
-#  --sig DiT-singleGPU-torch.nn.parallel \
-#  --wandb \
-#  --sample --sample-size 4
+# torchrun --nnodes=1 --nproc_per_node=2 --master_port 28473 train.py --model DiT-S/8     --data-path /scratch/shared/beegfs/shared-datasets/ImageNet/ILSVRC12/train/ --sig DiT-sample --wandb --sample --sample-size 4
+# torchrun --nnodes=1 --nproc_per_node=2 --master_port 28473 train.py --model DiT-DEQ-S/8 --data-path /scratch/shared/beegfs/shared-datasets/ImageNet/ILSVRC12/train/ --sig DEQ-sample --wandb --sample --sample-size 4
+# torchrun --nnodes=1 --nproc_per_node=4 --master_port 28473 train.py --model DiT-DEQ-S/8 --data-path /scratch/shared/beegfs/shared-datasets/ImageNet/ILSVRC12/train/ --sig DEQ-nosample --wandb --sample --sample-size 4
 
 echo “Job completed.”

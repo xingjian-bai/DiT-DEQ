@@ -8,12 +8,11 @@
 A minimal training script for DiT using PyTorch DDP.
 """
 import torch
-# the first flag below was False when we tested this script but True makes A100 training a lot faster:
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 import torch.distributed as dist
-# from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.nn import DataParallel as DDP 
+from torch.nn.parallel import DistributedDataParallel as DDP
+#from torch.nn import DataParallel as DDP #NEVER USE THIS
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from torchvision.datasets import ImageFolder
@@ -107,6 +106,14 @@ def center_crop_arr(pil_image, image_size):
 #                                  Training Loop                                #
 #################################################################################
 
+def sample(args, model):
+    with torch.no_grad():
+        model.eval() 
+        from eval import evaluation_large
+        images = evaluation_large(model.module, args, sample_size = args.sample_size, sample_step = args.sample_step)
+        model.train()
+    return images
+
 def main(args):
     """
     Trains a new DiT model.
@@ -120,10 +127,15 @@ def main(args):
     device = rank % torch.cuda.device_count()
     print(f"device={device}, gpus per node={torch.cuda.device_count()}.")
     seed = args.global_seed * dist.get_world_size() + rank
+
+    seed += np.random.randint(100000)
+    print(f"seed: {seed}")
+    
+    
+    
     torch.manual_seed(seed)
     torch.cuda.set_device(device)
     print(f"Starting rank={rank}, seed={seed}, world_size={dist.get_world_size()}.")
-
     
 
     # Setup an experiment folder:
@@ -143,9 +155,6 @@ def main(args):
         # print('in else')
         logger = create_logger(None)
         # print('logger created')
-
-    # dist.barrier()
-    # print(f"Rank {rank} HERE")
 
     # Create model:
     assert args.image_size % 8 == 0, "Image size must be divisible by 8 (for the VAE encoder)."
@@ -239,22 +248,16 @@ def main(args):
                 dist.all_reduce(avg_loss, op=dist.ReduceOp.SUM)
                 avg_loss = avg_loss.item() / dist.get_world_size()
                 logger.info(f"(step={train_steps:07d}) Train Loss: {avg_loss:.4f}, Train Steps/Sec: {steps_per_sec:.2f}")
-                print(f"checking random number generation: {torch.randn(5)}")
-                if rank == 0:
-                    if args.wandb:
-                        if args.sample:
-                            def sample(args, model):
-                                with torch.no_grad():
-                                    model.eval()  # important! This disables randomized embedding dropout
-                                    from eval import evaluation_large
-                                    images = evaluation_large(model.module, args, sample_size = args.sample_size, sample_step = args.sample_step)
-                                return images
-                                # print(f"in this evaluation, the fid score is {fid_score}")
-                            images = sample(args, model)
-                            model.train()
-                            wandb.log({"train_loss": avg_loss, "train_steps_per_sec": steps_per_sec, "train_step": train_steps, "images": [wandb.Image(image) for image in images]})
-                        else:
-                            wandb.log({"train_loss": avg_loss, "train_steps_per_sec": steps_per_sec, "train_step": train_steps})
+                print(f"rank={rank}, checking random number generation: {torch.randn(5)}")
+                
+                if args.wandb:
+                    if args.sample:
+                        images = sample(args, model)
+                    else:
+                        images = []
+                    if rank == 0:
+                        wandb.log({"train_loss": avg_loss, "train_steps_per_sec": steps_per_sec, "train_step": train_steps, "images": [wandb.Image(image) for image in images]})
+
                 # Reset monitoring variables:
                 running_loss = 0
                 log_steps = 0
@@ -294,7 +297,7 @@ if __name__ == "__main__":
     parser.add_argument("--global-seed", type=int, default=0)
     parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")  # Choice doesn't affect training
     parser.add_argument("--num-workers", type=int, default=4)
-    parser.add_argument("--log-every", type=int, default=300)
+    parser.add_argument("--log-every", type=int, default=200)
     parser.add_argument("--ckpt-every", type=int, default=50_000)
     parser.add_argument("--sig", type=str, default="")
     parser.add_argument("--wandb", action="store_true", default=False)

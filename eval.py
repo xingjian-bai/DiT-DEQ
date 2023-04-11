@@ -45,7 +45,10 @@ def evaluation (model, args, sample_size = 8, sample_step = 250):
 
     #  Set user inputs:
     seed = 0 #@param {type:"number"}
-    torch.manual_seed(seed)
+    noise_generator = torch.Generator(device=device)
+    noise_generator.manual_seed(seed)
+    # torch.manual_seed(seed) # no!! this is plugged in the training loop
+
     num_sampling_steps = sample_step #@param {type:"slider", min:0, max:1000, step:1}
     cfg_scale = 4 #@param {type:"slider", min:1, max:10, step:0.1}
     class_labels = [0] * sample_size #@param {type:"raw"}
@@ -56,7 +59,7 @@ def evaluation (model, args, sample_size = 8, sample_step = 250):
 
     # Create sampling noise:
     # n = len(class_labels)
-    z = torch.randn(sample_size, 4, latent_size, latent_size, device=device)
+    z = torch.randn(sample_size, 4, latent_size, latent_size, device=device, generator=noise_generator)
     y = torch.tensor(class_labels, device=device)
 
     # Setup classifier-free guidance:
@@ -80,7 +83,7 @@ def evaluation (model, args, sample_size = 8, sample_step = 250):
 def evaluation_large (model, args, sample_size = 512, sample_step = 250):
     samples = []
 
-    if sample_size < 8:
+    if sample_size <= 8:
         return evaluation(model, args, sample_size, sample_step)
 
     batch_size = 8
