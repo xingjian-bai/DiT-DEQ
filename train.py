@@ -128,8 +128,8 @@ def main(args):
     print(f"device={device}, gpus per node={torch.cuda.device_count()}.")
     seed = args.global_seed * dist.get_world_size() + rank
 
-    seed += np.random.randint(100000)
-    print(f"seed: {seed}")
+    # seed += np.random.randint(100000)
+    # print(f"seed: {seed}")
     
     
     
@@ -150,7 +150,8 @@ def main(args):
         logger = create_logger(experiment_dir)
         logger.info(f"Experiment directory created at {experiment_dir}")
         if args.wandb:
-            wandb.init(project="DiT-self-trained",entity="xingjian-bai",config=args, name=args.sig)
+            experiment_name = f"{args.model}-sample{int(args.sample)}-gseed{args.global_seed}-ds{args.data_seed}--{args.sig}"
+            wandb.init(project="DiT-self-trained",entity="xingjian-bai",config=args, name=experiment_name)
     else:
         # print('in else')
         logger = create_logger(None)
@@ -191,7 +192,8 @@ def main(args):
         num_replicas=dist.get_world_size(),
         rank=rank,
         shuffle=True,
-        seed=args.global_seed
+        # seed=args.global_seed
+        seed=args.data_seed
     )
     loader = DataLoader(
         dataset,
@@ -295,6 +297,7 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=1400)
     parser.add_argument("--global-batch-size", type=int, default=128)
     parser.add_argument("--global-seed", type=int, default=0)
+    parser.add_argument("--data-seed", type=int, default=0)
     parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")  # Choice doesn't affect training
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--log-every", type=int, default=200)
