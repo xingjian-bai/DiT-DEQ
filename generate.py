@@ -42,11 +42,11 @@ def create_npz_from_sample_folder(sample_dir, num=50_000):
     return npz_path
 
 
-def main(args):
+def generate_for_fid(args, tf32 = True):
     """
     Run sampling.
     """
-    torch.backends.cuda.matmul.allow_tf32 = args.tf32  # True: fast but may lead to some small numerical differences
+    torch.backends.cuda.matmul.allow_tf32 = tf32  # True: fast but may lead to some small numerical differences
     assert torch.cuda.is_available(), "Sampling with DDP requires at least one GPU. sample.py supports CPU-only usage"
     torch.set_grad_enabled(False)
 
@@ -59,20 +59,15 @@ def main(args):
     torch.cuda.set_device(device)
     print(f"Starting rank={rank}, seed={seed}, world_size={dist.get_world_size()}.")
 
-    if args.ckpt is None:
-        assert args.model == "DiT-XL/2", "Only DiT-XL/2 models are available for auto-download."
-        assert args.image_size in [256, 512]
-        assert args.num_classes == 1000
-
     # Load model:
     latent_size = args.image_size // 8
     model = DiT_models[args.model](
         input_size=latent_size,
         num_classes=args.num_classes
     ).to(device)
-    # Auto-download a pre-trained model or load a custom DiT checkpoint from train.py:
-    ckpt_path = args.ckpt or f"DiT-XL-2-{args.image_size}x{args.image_size}.pt"
+    ckpt_path = args.ckpt
     state_dict = find_model(ckpt_path)
+    
     model.load_state_dict(state_dict)
     model.eval()  # important!
     diffusion = create_diffusion(str(args.num_sampling_steps))
@@ -139,30 +134,11 @@ def main(args):
 
     # Make sure all processes have finished saving their samples before attempting to convert to .npz
     dist.barrier()
-    if rank == 0:
-        create_npz_from_sample_folder(sample_folder_dir, args.num_fid_samples)
-        print("Done.")
-    dist.barrier()
+    # if rank == 0:
+        # npz_path = create_npz_from_sample_folder(sample_folder_dir, args.num_fid_samples)
+        # print("Done.")
+    # dist.barrier()
     dist.destroy_process_group()
 
+    return sample_folder_dir
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-XL/2")
-    parser.add_argument("--vae",  type=str, choices=["ema", "mse"], default="ema")
-    parser.add_argument("--sample-dir", type=str, default="samples")
-    parser.add_argument("--per-proc-batch-size", type=int, default=32)
-    parser.add_argument("--num-fid-samples", type=int, default=50_000)
-    parser.add_argument("--num-sampling-steps", type=int, default=250)
-
-    parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
-    parser.add_argument("--num-classes", type=int, default=1000)
-    parser.add_argument("--cfg-scale",  type=float, default=1.5)
-    
-    parser.add_argument("--global-seed", type=int, default=0)
-    parser.add_argument("--tf32", action=argparse.BooleanOptionalAction, default=True,
-                        help="By default, use TF32 matmuls. This massively accelerates sampling on Ampere GPUs.")
-    parser.add_argument("--ckpt", type=str, default=None,
-                        help="Optional path to a DiT checkpoint (default: auto-download a pre-trained DiT-XL/2 model).")
-    args = parser.parse_args()
-    main(args)

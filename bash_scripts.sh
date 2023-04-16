@@ -64,8 +64,8 @@ torchrun --nnodes=1 --nproc_per_node=2 sample_ddp.py \
 srun --ntasks=1 --time=48:00:00 --cpus-per-task=12 --partition=gpu \
  --pty --gres=gpu:4 --constraint=gmem48G /bin/zsh
 
-srun --ntasks=1 --time=48:00:00 --cpus-per-task=12 --partition=ddp-2way \
- --pty --gres=gpu:2 --constraint=gmem48G /bin/zsh
+srun --ntasks=1 --time=48:00:00 --cpus-per-task=12 --partition=ddp-4way \
+ --pty --gres=gpu:4 --constraint=gmem48G /bin/zsh
 
 srun --ntasks=1 --time=48:00:00 --cpus-per-task=12 --partition=gpu \
  --pty --gres=gpu:2 --constraint=gmem48G /bin/zsh

@@ -6,6 +6,7 @@ from torchvision.utils import save_image
 from diffusion import create_diffusion
 from diffusers.models import AutoencoderKL
 
+
 torch.set_grad_enabled(False)
 device = "cuda" if torch.cuda.is_available() else "cpu"
 if device == "cpu":
@@ -23,6 +24,9 @@ import os
 import numpy as np
 import math
 import argparse
+from models import DiT_models
+from diffusion import create_diffusion
+from diffusers.models import AutoencoderKL
 
 # %%
 
@@ -93,3 +97,33 @@ def evaluation_large (model, args, sample_size = 512, sample_step = 250):
     samples = torch.cat(samples, dim=0)
     # print("shape: ", samples.shape)
     return samples
+
+# def evaluate_fid (model, args, sample_size = 8, sample_step = 250):
+#     samples = evaluation_large(model, args, sample_size, sample_step)
+#     save_images(samples, "sample")
+#     score = compute_fid("sample", args.dataset)
+#     return score
+
+from generate import generate_for_fid
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-XL/2")
+    parser.add_argument("--vae",  type=str, choices=["ema", "mse"], default="ema")
+    parser.add_argument("--sample-dir", type=str, default="samples")
+    parser.add_argument("--per-proc-batch-size", type=int, default=32)
+    parser.add_argument("--num-fid-samples", type=int, default=50_000)
+    parser.add_argument("--num-sampling-steps", type=int, default=250)
+
+    parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
+    parser.add_argument("--num-classes", type=int, default=1000)
+    parser.add_argument("--cfg-scale",  type=float, default=1.0)
+    parser.add_argument("--global-seed", type=int, default=42)
+
+    parser.add_argument("--ckpt", type=str, default=None,
+                        help="Optional path to a DiT checkpoint (default: auto-download a pre-trained DiT-XL/2 model).")
+    args = parser.parse_args()
+
+    sample_folder_dir = generate_for_fid(args)
+    score = fid.compute_fid(sample_folder_dir, dataset_name="FFHQ", dataset_res=1024, dataset_split="trainval70k")
+
+    
