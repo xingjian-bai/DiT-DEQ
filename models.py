@@ -217,7 +217,6 @@ class DiT(nn.Module):
         self.out_channels = in_channels * 2 if learn_sigma else in_channels
         self.patch_size = patch_size
         self.num_heads = num_heads
-        self.deq_mode = deq_mode
 
         self.x_embedder = PatchEmbed(input_size, patch_size, in_channels, hidden_size, bias=True)
         self.t_embedder = TimestepEmbedder(hidden_size)
@@ -231,12 +230,19 @@ class DiT(nn.Module):
                 DiTBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio) for _ in range(depth)
             ])
         elif deq_mode == "simulate_repeat":
+            print(f"DEQ simulate {depth} repeats")
+            self.deq = deqlib.DEQ(n_losses = 1, f_max = depth, b_solver="backprop")
+            self.block = DiTDEQBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio)
+        elif deq_mode == "simulate_repeat_rand":
             print(f"this model uses DEQ to simulate {depth} repeats, randomizing in training")
             self.deq = deqlib.DEQ(n_losses = 1, f_max = depth, f_max_lb = depth / 2, b_solver="backprop")
-            # print(f"created 200 layers DEQ")
             self.block = DiTDEQBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio)
+        elif deq_mode == "back1":
+            self.deq = deqlib.DEQ(n_losses = 1, f_max = depth, b_solver="naive_solver")
+            self.block = DiTDEQBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio)
+        
         else:
-            raise ValueError("deq_mode must be None or 'simulate_repeat'")
+            raise ValueError("deq_mode must be None or 'simulate_repeat' or 'simulate_repeat_rand'")
 
         self.final_layer = FinalLayer(hidden_size, patch_size, self.out_channels)
         self.initialize_weights()
@@ -272,11 +278,8 @@ class DiT(nn.Module):
             for block in self.blocks:
                 nn.init.constant_(block.adaLN_modulation[-1].weight, 0)
                 nn.init.constant_(block.adaLN_modulation[-1].bias, 0)
-        elif self.deq_mode == "simulate_repeat":
-            nn.init.constant_(self.block.adaLN_modulation[-1].weight, 0)
-            nn.init.constant_(self.block.adaLN_modulation[-1].bias, 0)
         else:
-            raise ValueError("deq_mode must be None or 'simulate_repeat'")
+            nn.init.constant_(self.block.adaLN_modulation[-1].weight, 0)
 
         # Zero-out output layers:
         nn.init.constant_(self.final_layer.adaLN_modulation[-1].weight, 0)
@@ -314,11 +317,9 @@ class DiT(nn.Module):
         if self.deq_mode == None:
             for block in self.blocks:
                 x = block(x, c)                      # (N, T, D)
-        elif self.deq_mode == "simulate_repeat":
+        else:
             self.block.equip_c(c)
             x, _, _ = self.deq(self.block, x)       # (N, T, D)
-        else:
-            raise ValueError("deq_mode must be None or 'simulate_repeat'")
         x = self.final_layer(x, c)                # (N, T, patch_size ** 2 * out_channels)
         x = self.unpatchify(x)                   # (N, out_channels, H, W)
         return x
@@ -431,6 +432,10 @@ def DiT_DEQ_B_4_rand_sim(**kwargs):
 def DiT_DEQ_B_4_sim(**kwargs):
     return DiT(deq_mode = "simulate_repeat", depth=12, hidden_size=768, patch_size=4, num_heads=12, **kwargs)
 
+def DiT_DEQ_B_4_back1(**kwargs):
+    return DiT(deq_mode = "back1", depth=12, hidden_size=768, patch_size=4, num_heads=12, **kwargs)
+
+
 
 def DiT_B_8(**kwargs):
     return DiT(depth=12, hidden_size=768, patch_size=8, num_heads=12, **kwargs)
@@ -457,4 +462,5 @@ DiT_models = {
     'DiT-DEQ-S/8': DiT_DEQ_S_8,
     'DiT-DEQ-B/4-sim': DiT_DEQ_B_4_sim,
     'DiT-DEQ-B/4-rand-sim': DiT_DEQ_B_4_rand_sim,
+    'DiT-DEQ-B/4-back1': DiT_DEQ_B_4_back1,
 }

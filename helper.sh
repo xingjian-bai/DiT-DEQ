@@ -1,20 +1,20 @@
 #!/bin/bash
 #SBATCH --time=72:00:00
-#SBATCH --partition=ddp-4way
+#SBATCH --partition=gpu
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:4
+#SBATCH --gres=gpu:2
 #SBATCH --cpus-per-task=16
-# SBATCH --constraint=gmem48G
+#SBATCH --constraint=gmem48G
 
 gpustat
 date
 echo “Job started.”
 
 # #train a one-backprop deq
-# torchrun --nnodes=1 --nproc_per_node=4 --master_port 28473 train.py --model DiT-DEQ-B/4-sim   --sig back1 --sample
+torchrun --nnodes=1 --nproc_per_node=2 --master_port 28473 train.py --model DiT-DEQ-B/4-back1  
 
 #train a random-thres dep
-torchrun --nnodes=1 --nproc_per_node=4 --master_port 28473 train.py --model DiT-DEQ-B/4-rand-sim --sig backprop-rand --sample
+# torchrun --nnodes=1 --nproc_per_node=2 --master_port 28473 train.py --model DiT-DEQ-B/4-rand-sim
 
 
 
