@@ -40,22 +40,16 @@ torchrun --nnodes=1 --nproc_per_node=1 deq_train.py \
 ###################
 #!/bin/bash
 #SBATCH --time=12:00:00
-#SBATCH --partition=ddp-4-way
+#SBATCH --partition=ddp-4way
 #SBATCH --mem=100G
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:4
-#SBATCH --cpus-per-task=12
+#SBATCH --cpus-per-task=16
 
 gpustat
 date
 echo “Job started.”
-time torchrun --nnodes=1 --nproc_per_node=4 deq_train.py \
-  --sample-step 1000 --sample-size 8 --global-batch-size 128\
-  --epochs 2000 --model DiT-S/8 \
-  --data-path /scratch/shared/beegfs/shared-datasets/ImageNet/ILSVRC12/train/ --image-size 256 \
-  --num-classes 1000 \
-  --log-every 100 --ckpt-every 1000 \
-  --wandb
+time torchrun --nnodes=1 --nproc_per_node=4 --master_port 28473 train.py --model DiT-S/8 --data-path /scratch/shared/beegfs/shared-datasets/ImageNet/ILSVRC12/train/
 echo “Job completed.”
 ###################
 
@@ -68,12 +62,72 @@ torchrun --nnodes=1 --nproc_per_node=2 sample_ddp.py \
 
 # srun
 srun --ntasks=1 --time=48:00:00 --cpus-per-task=12 --partition=gpu \
- --pty --gres=gpu:4 --constraint=gmem48G --nodelist=gnodel2 /bin/zsh
+ --pty --gres=gpu:4 --constraint=gmem48G /bin/zsh
+
+srun --ntasks=1 --time=48:00:00 --cpus-per-task=12 --partition=ddp-4way \
+ --pty --gres=gpu:4 --constraint=gmem48G /bin/zsh
 
 srun --ntasks=1 --time=48:00:00 --cpus-per-task=12 --partition=gpu \
-  --mem=100G --pty --gres=gpu:4 --constraint=gmem48G /bin/zsh
+ --pty --gres=gpu:2 --constraint=gmem48G /bin/zsh
+
+srun --ntasks=1 --time=48:00:00 --cpus-per-task=12 --partition=low-prio-gpu \
+  --mem=100G --pty --gres=gpu:2 --constraint=gmem48G /bin/zsh
 
 srun --ntasks=1 --time=24:00:00 --cpus-per-task=12 --partition=ddp-4way \
   --mem=50G --pty /bin/zsh
+
+
+## NEW TRY
+torchrun --nnodes=1 --nproc_per_node=1 deq_train.py \
+  --global-batch-size 128\
+  --model DiT-S/8\
+  --data-path /scratch/shared/beegfs/shared-datasets/ImageNet/ILSVRC12/train/ --image-size 256 \
+  --wandb
+
+torchrun --nnodes=1 --nproc_per_node=4 --master_port 28473 train.py --model DiT-S/8 --data-path /scratch/shared/beegfs/shared-datasets/ImageNet/ILSVRC12/train/
+
+
+###
+torchrun --nnodes=1 --nproc_per_node=4 --master_port 28473 train.py \
+ --model DiT-DEQ-S/8 \
+ --data-path /scratch/shared/beegfs/shared-datasets/ImageNet/ILSVRC12/train/ \
+ --sig DEQ_simulate_correct1 \
+ --wandb \
+ --log-every 100
+
+ torchrun --nnodes=1 --nproc_per_node=4 --master_port 28473 train.py \
+ --model DiT-DEQ-S/8 \
+ --data-path /scratch/shared/beegfs/shared-datasets/ImageNet/ILSVRC12/train/ \
+ --sig DEQ_simulate_correct1_with_sample \
+ --wandb \
+ --sample
+
+
+ torchrun --nnodes=1 --nproc_per_node=2 --master_port 28473 train.py \
+ --model DiT-S/8 \
+ --data-path /scratch/shared/beegfs/shared-datasets/ImageNet/ILSVRC12/train/ \
+ --sig DEQ_plain_correct2_with_sample \
+ --wandb \
+ --sample
+
+
+
+## EVAL
+torchrun --nnodes=1 --nproc_per_node=4 eval.py \
+  --model DiT-B/4 \
+  --ckpt /work/xingjian/DiT/results/074-DiT-B-4/checkpoints/0050000.pt
+
+python fid.py \
+  --model DiT-B/4 \
+  --ckpt /work/xingjian/DiT/results/075-DiT-B-4/checkpoints/0050000.pt
+
+
+
+torchrun --nnodes=1 --nproc_per_node=4 eval.py \
+  --model DiT-DEQ-B/4 \
+  --ckpt /work/xingjian/DiT/results/075-DiT-DEQ-B-4/checkpoints/0150000.pt
+python fid.py \
+  --model DiT-DEQ-B/4 \
+  --ckpt /work/xingjian/DiT/results/075-DiT-DEQ-B-4/checkpoints/0150000.pt
 
 
