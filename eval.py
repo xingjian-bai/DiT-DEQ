@@ -104,26 +104,46 @@ def evaluation_large (model, args, sample_size = 512, sample_step = 250):
 #     score = compute_fid("sample", args.dataset)
 #     return score
 
-from generate import generate_for_fid
+    
+num_sampling_steps = [250]
+num_sampling_iterations = [i for i in range (1, 60)]
+
+from generate import generate
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-XL/2")
     parser.add_argument("--vae",  type=str, choices=["ema", "mse"], default="ema")
     parser.add_argument("--sample-dir", type=str, default="samples")
-    parser.add_argument("--per-proc-batch-size", type=int, default=32)
-    parser.add_argument("--num-fid-samples", type=int, default=50_000)
+    parser.add_argument("--per-proc-batch-size", type=int, default=128)
+    parser.add_argument("--num-fid-samples", type=int, default=2048)
+
     parser.add_argument("--num-sampling-steps", type=int, default=250)
+    parser.add_argument("--num-sampling-iterations", type=int, default=12)
 
     parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
     parser.add_argument("--num-classes", type=int, default=1000)
     parser.add_argument("--cfg-scale",  type=float, default=1.0)
     parser.add_argument("--global-seed", type=int, default=42)
 
-    parser.add_argument("--ckpt", type=str, default=None,
+    parser.add_argument("--ckpt", type=str,
                         help="Optional path to a DiT checkpoint (default: auto-download a pre-trained DiT-XL/2 model).")
     args = parser.parse_args()
 
-    sample_folder_dir = generate_for_fid(args)
-    score = fid.compute_fid(sample_folder_dir, dataset_name="FFHQ", dataset_res=1024, dataset_split="trainval70k")
 
+
+
+     # Setup DDP:
+    dist.init_process_group("nccl")
+    rank = dist.get_rank()
+    device = rank % torch.cuda.device_count()
+    seed = args.global_seed * dist.get_world_size() + rank
+    torch.manual_seed(seed)
+    torch.cuda.set_device(device)
+    print(f"Starting rank={rank}, seed={seed}, world_size={dist.get_world_size()}.")
+
+
+    for num_sampling_step in num_sampling_steps:
+        for num_sampling_iteration in num_sampling_iterations:
+            generate(args, num_sampling_step, num_sampling_iteration, rank=rank, device=device)
     
+    dist.destroy_process_group()

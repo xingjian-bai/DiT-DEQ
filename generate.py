@@ -24,6 +24,9 @@ import numpy as np
 import math
 import argparse
 
+import wandb
+from cleanfid import fid
+
 
 def create_npz_from_sample_folder(sample_dir, num=50_000):
     """
@@ -42,22 +45,19 @@ def create_npz_from_sample_folder(sample_dir, num=50_000):
     return npz_path
 
 
-def generate_for_fid(args, tf32 = True):
+def generate(args, num_sampling_steps = None, num_sampling_iterations = None, tf32 = True, rank = 0, device = 0):
     """
     Run sampling.
     """
     torch.backends.cuda.matmul.allow_tf32 = tf32  # True: fast but may lead to some small numerical differences
-    assert torch.cuda.is_available(), "Sampling with DDP requires at least one GPU. sample.py supports CPU-only usage"
     torch.set_grad_enabled(False)
 
-    # Setup DDP:
-    dist.init_process_group("nccl")
-    rank = dist.get_rank()
-    device = rank % torch.cuda.device_count()
-    seed = args.global_seed * dist.get_world_size() + rank
-    torch.manual_seed(seed)
-    torch.cuda.set_device(device)
-    print(f"Starting rank={rank}, seed={seed}, world_size={dist.get_world_size()}.")
+   
+    if num_sampling_steps is None:
+        num_sampling_steps = args.num_sampling_steps
+    if num_sampling_iterations is None:
+        num_sampling_iterations = args.num_sampling_iterations
+
 
     # Load model:
     latent_size = args.image_size // 8
@@ -70,7 +70,16 @@ def generate_for_fid(args, tf32 = True):
     
     model.load_state_dict(state_dict)
     model.eval()  # important!
-    diffusion = create_diffusion(str(args.num_sampling_steps))
+    # change the sample step of DEQ inside the model to num_sampling_iterations
+    if model.deq_mode == 'simulate_repeat':
+        model.deq.eval_f_thres = num_sampling_iterations
+    elif model.deq_mode == None:
+        pass
+    else:
+        raise NotImplementedError
+    
+    diffusion = create_diffusion(str(num_sampling_steps))
+    
     vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
     assert args.cfg_scale >= 1.0, "In almost all cases, cfg_scale be >= 1.0"
     using_cfg = args.cfg_scale > 1.0
@@ -79,8 +88,17 @@ def generate_for_fid(args, tf32 = True):
     model_string_name = args.model.replace("/", "-")
     ckpt_string_name = os.path.basename(args.ckpt).replace(".pt", "") if args.ckpt else "pretrained"
     folder_name = f"{model_string_name}-{ckpt_string_name}-size-{args.image_size}-vae-{args.vae}-" \
-                  f"cfg-{args.cfg_scale}-seed-{args.global_seed}"
+                  f"cfg-{args.cfg_scale}-seed-{args.global_seed}" \
+                  f"-steps-{num_sampling_steps}-iters-{num_sampling_iterations}"
     sample_folder_dir = f"{args.sample_dir}/{folder_name}"
+
+    # if it exists, we delete all the files in the folder
+    if os.path.exists(sample_folder_dir):
+        files = os.listdir(sample_folder_dir)
+        for file in files:
+            if rank == 0:
+                os.remove(os.path.join(sample_folder_dir, file))
+
     if rank == 0:
         os.makedirs(sample_folder_dir, exist_ok=True)
         print(f"Saving .png samples at {sample_folder_dir}")
@@ -134,11 +152,30 @@ def generate_for_fid(args, tf32 = True):
 
     # Make sure all processes have finished saving their samples before attempting to convert to .npz
     dist.barrier()
+    
     # if rank == 0:
-        # npz_path = create_npz_from_sample_folder(sample_folder_dir, args.num_fid_samples)
-        # print("Done.")
-    # dist.barrier()
-    dist.destroy_process_group()
-
+    # print(f"model: {args.model}, num_fid_samples: {args.num_fid_samples}, num_sampling_steps: {args.num_sampling_steps}, ckpt: {args.ckpt}")
+        # print(f"fid score: {score}")
+    
     return sample_folder_dir
 
+#import namespace
+from argparse import Namespace
+def calc_fid (args, train_args): #WITH ONLY ONE GPU
+    # if train_args is a dict, we convert it to a Namespace object
+    if isinstance(train_args, dict):
+        train_args = Namespace(**train_args)
+
+    model_string_name = args.model.replace("/", "-")
+    ckpt_string_name = os.path.basename(args.ckpt).replace(".pt", "") if args.ckpt else "pretrained"
+    folder_name = f"{model_string_name}-{ckpt_string_name}-size-{args.image_size}-vae-{args.vae}-" \
+                  f"cfg-{args.cfg_scale}-seed-{args.global_seed}" \
+                  f"-steps-{train_args.num_sampling_steps}-iters-{train_args.num_sampling_iterations}"
+    sample_folder_dir = f"{args.sample_dir}/{folder_name}"
+    print(f"FID for {sample_folder_dir}")
+    score = fid.compute_fid(sample_folder_dir, dataset_name="imagenet", dataset_res=256)
+
+    files = os.listdir(sample_folder_dir)
+    for file in files[:max(0, -16)]:
+        os.remove(os.path.join(sample_folder_dir, file))
+    return score

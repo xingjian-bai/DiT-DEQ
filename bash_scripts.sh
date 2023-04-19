@@ -110,3 +110,24 @@ torchrun --nnodes=1 --nproc_per_node=4 --master_port 28473 train.py \
  --wandb \
  --sample
 
+
+
+## EVAL
+torchrun --nnodes=1 --nproc_per_node=4 eval.py \
+  --model DiT-B/4 \
+  --ckpt /work/xingjian/DiT/results/074-DiT-B-4/checkpoints/0050000.pt
+
+python fid.py \
+  --model DiT-B/4 \
+  --ckpt /work/xingjian/DiT/results/075-DiT-B-4/checkpoints/0050000.pt
+
+
+
+torchrun --nnodes=1 --nproc_per_node=4 eval.py \
+  --model DiT-DEQ-B/4 \
+  --ckpt /work/xingjian/DiT/results/075-DiT-DEQ-B-4/checkpoints/0150000.pt
+python fid.py \
+  --model DiT-DEQ-B/4 \
+  --ckpt /work/xingjian/DiT/results/075-DiT-DEQ-B-4/checkpoints/0150000.pt
+
+

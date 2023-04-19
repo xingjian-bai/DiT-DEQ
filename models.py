@@ -217,6 +217,7 @@ class DiT(nn.Module):
         self.out_channels = in_channels * 2 if learn_sigma else in_channels
         self.patch_size = patch_size
         self.num_heads = num_heads
+        self.deq_mode = deq_mode
 
         self.x_embedder = PatchEmbed(input_size, patch_size, in_channels, hidden_size, bias=True)
         self.t_embedder = TimestepEmbedder(hidden_size)
@@ -230,8 +231,8 @@ class DiT(nn.Module):
                 DiTBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio) for _ in range(depth)
             ])
         elif deq_mode == "simulate_repeat":
-            print(f"this model uses DEQ to simulate {depth} repeats")
-            self.deq = deqlib.DEQ(n_losses = 1, f_max = depth, b_solver="backprop")
+            print(f"this model uses DEQ to simulate {depth} repeats, randomizing in training")
+            self.deq = deqlib.DEQ(n_losses = 1, f_max = depth, f_max_lb = depth / 2, b_solver="backprop")
             # print(f"created 200 layers DEQ")
             self.block = DiTDEQBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio)
         else:
@@ -424,8 +425,12 @@ def DiT_B_2(**kwargs):
 def DiT_B_4(**kwargs):
     return DiT(depth=12, hidden_size=768, patch_size=4, num_heads=12, **kwargs)
 
-def DiT_DEQ_B_4(**kwargs):
+def DiT_DEQ_B_4_rand_sim(**kwargs):
+    return DiT(deq_mode = "simulate_repeat_rand", depth=12, hidden_size=768, patch_size=4, num_heads=12, **kwargs)
+
+def DiT_DEQ_B_4_sim(**kwargs):
     return DiT(deq_mode = "simulate_repeat", depth=12, hidden_size=768, patch_size=4, num_heads=12, **kwargs)
+
 
 def DiT_B_8(**kwargs):
     return DiT(depth=12, hidden_size=768, patch_size=8, num_heads=12, **kwargs)
@@ -450,5 +455,6 @@ DiT_models = {
     'DiT-B/2':  DiT_B_2,   'DiT-B/4':  DiT_B_4,   'DiT-B/8':  DiT_B_8,
     'DiT-S/2':  DiT_S_2,   'DiT-S/4':  DiT_S_4,   'DiT-S/8':  DiT_S_8,
     'DiT-DEQ-S/8': DiT_DEQ_S_8,
-    'DiT-DEQ-B/4': DiT_DEQ_B_4,
+    'DiT-DEQ-B/4-sim': DiT_DEQ_B_4_sim,
+    'DiT-DEQ-B/4-rand-sim': DiT_DEQ_B_4_rand_sim,
 }
